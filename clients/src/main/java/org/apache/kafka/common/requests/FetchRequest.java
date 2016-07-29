@@ -33,6 +33,7 @@ public class FetchRequest extends AbstractRequest {
     private static final String REPLICA_ID_KEY_NAME = "replica_id";
     private static final String MAX_WAIT_KEY_NAME = "max_wait_time";
     private static final String MIN_BYTES_KEY_NAME = "min_bytes";
+    private static final String RESPONSE_MAX_BYTES_KEY_NAME = "max_bytes";
     private static final String TOPICS_KEY_NAME = "topics";
 
     // topic level field names
@@ -44,9 +45,13 @@ public class FetchRequest extends AbstractRequest {
     private static final String FETCH_OFFSET_KEY_NAME = "fetch_offset";
     private static final String MAX_BYTES_KEY_NAME = "max_bytes";
 
+    // default values for current version
+    public static final int DEFAULT_RESPONSE_MAX_BYTES = Integer.MAX_VALUE;
+
     private final int replicaId;
     private final int maxWait;
     private final int minBytes;
+    private final int maxBytes;
     private final Map<TopicPartition, PartitionData> fetchData;
 
     public static final class PartitionData {
@@ -62,20 +67,21 @@ public class FetchRequest extends AbstractRequest {
     /**
      * Create a non-replica fetch request
      */
-    public FetchRequest(int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData) {
-        this(CONSUMER_REPLICA_ID, maxWait, minBytes, fetchData);
+    public FetchRequest(int maxWait, int minBytes, int maxBytes, Map<TopicPartition, PartitionData> fetchData) {
+        this(CONSUMER_REPLICA_ID, maxWait, minBytes, maxBytes, fetchData);
     }
 
     /**
      * Create a replica fetch request
      */
-    public FetchRequest(int replicaId, int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData) {
+    public FetchRequest(int replicaId, int maxWait, int minBytes, int maxBytes, Map<TopicPartition, PartitionData> fetchData) {
         super(new Struct(CURRENT_SCHEMA));
         Map<String, Map<Integer, PartitionData>> topicsData = CollectionUtils.groupDataByTopic(fetchData);
 
         struct.set(REPLICA_ID_KEY_NAME, replicaId);
         struct.set(MAX_WAIT_KEY_NAME, maxWait);
         struct.set(MIN_BYTES_KEY_NAME, minBytes);
+        struct.set(RESPONSE_MAX_BYTES_KEY_NAME, maxBytes);
         List<Struct> topicArray = new ArrayList<Struct>();
         for (Map.Entry<String, Map<Integer, PartitionData>> topicEntry : topicsData.entrySet()) {
             Struct topicData = struct.instance(TOPICS_KEY_NAME);
@@ -96,6 +102,7 @@ public class FetchRequest extends AbstractRequest {
         this.replicaId = replicaId;
         this.maxWait = maxWait;
         this.minBytes = minBytes;
+        this.maxBytes = maxBytes;
         this.fetchData = fetchData;
     }
 
@@ -104,6 +111,10 @@ public class FetchRequest extends AbstractRequest {
         replicaId = struct.getInt(REPLICA_ID_KEY_NAME);
         maxWait = struct.getInt(MAX_WAIT_KEY_NAME);
         minBytes = struct.getInt(MIN_BYTES_KEY_NAME);
+        if (struct.hasField(RESPONSE_MAX_BYTES_KEY_NAME))
+            maxBytes = struct.getInt(RESPONSE_MAX_BYTES_KEY_NAME);
+        else
+            maxBytes = DEFAULT_RESPONSE_MAX_BYTES;
         fetchData = new HashMap<TopicPartition, PartitionData>();
         for (Object topicResponseObj : struct.getArray(TOPICS_KEY_NAME)) {
             Struct topicResponse = (Struct) topicResponseObj;
@@ -151,6 +162,10 @@ public class FetchRequest extends AbstractRequest {
 
     public int minBytes() {
         return minBytes;
+    }
+
+    public int maxBytes() {
+        return maxBytes;
     }
 
     public Map<TopicPartition, PartitionData> fetchData() {
