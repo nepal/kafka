@@ -67,21 +67,34 @@ public class FetchRequest extends AbstractRequest {
     /**
      * Create a non-replica fetch request
      */
-    public FetchRequest(int maxWait, int minBytes, int maxBytes, Map<TopicPartition, PartitionData> fetchData) {
-        this(CONSUMER_REPLICA_ID, maxWait, minBytes, maxBytes, fetchData);
+    public FetchRequest(int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData) {
+        this(CONSUMER_REPLICA_ID, maxWait, minBytes, fetchData, ProtoUtils.latestVersion(ApiKeys.FETCH.id), DEFAULT_RESPONSE_MAX_BYTES);
     }
+    public FetchRequest(int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData, int maxBytes) {
+        this(CONSUMER_REPLICA_ID, maxWait, minBytes, fetchData, ProtoUtils.latestVersion(ApiKeys.FETCH.id), maxBytes);
+    }
+
 
     /**
      * Create a replica fetch request
      */
-    public FetchRequest(int replicaId, int maxWait, int minBytes, int maxBytes, Map<TopicPartition, PartitionData> fetchData) {
-        super(new Struct(CURRENT_SCHEMA));
+    public FetchRequest(int replicaId, int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData) {
+        this(replicaId, maxWait, minBytes, fetchData, ProtoUtils.latestVersion(ApiKeys.FETCH.id), DEFAULT_RESPONSE_MAX_BYTES);
+    }
+
+    public FetchRequest(int replicaId, int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData, int maxBytes) {
+        this(replicaId, maxWait, minBytes, fetchData, ProtoUtils.latestVersion(ApiKeys.FETCH.id), maxBytes);
+    }
+
+    public FetchRequest(int replicaId, int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData, int version, int maxBytes) {
+        super(new Struct(ProtoUtils.requestSchema(ApiKeys.FETCH.id, version)));
         Map<String, Map<Integer, PartitionData>> topicsData = CollectionUtils.groupDataByTopic(fetchData);
 
         struct.set(REPLICA_ID_KEY_NAME, replicaId);
         struct.set(MAX_WAIT_KEY_NAME, maxWait);
         struct.set(MIN_BYTES_KEY_NAME, minBytes);
-        struct.set(RESPONSE_MAX_BYTES_KEY_NAME, maxBytes);
+        if (version >= 3)
+            struct.set(RESPONSE_MAX_BYTES_KEY_NAME, maxBytes);
         List<Struct> topicArray = new ArrayList<Struct>();
         for (Map.Entry<String, Map<Integer, PartitionData>> topicEntry : topicsData.entrySet()) {
             Struct topicData = struct.instance(TOPICS_KEY_NAME);

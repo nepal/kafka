@@ -277,7 +277,7 @@ class ReplicaFetcherThread(name: String,
         requestMap(new TopicPartition(topic, partition)) = new JFetchRequest.PartitionData(partitionFetchState.offset, fetchSize)
     }
 
-    new FetchRequest(new JFetchRequest(replicaId, maxWait, minBytes, maxBytes, requestMap.asJava))
+    new FetchRequest(new JFetchRequest(replicaId, maxWait, minBytes, requestMap.asJava, fetchRequestVersion, maxBytes))
   }
 
 }
