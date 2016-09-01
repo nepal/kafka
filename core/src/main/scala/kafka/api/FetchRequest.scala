@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.nio.ByteBuffer
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 
-import scala.collection.immutable.Map
+import scala.collection.immutable.{ListMap, Map}
 
 case class PartitionFetchInfo(offset: Long, fetchSize: Int)
 
@@ -58,7 +58,7 @@ object FetchRequest {
         (TopicAndPartition(topic, partitionId), PartitionFetchInfo(offset, fetchSize))
       })
     })
-    FetchRequest(versionId, correlationId, clientId, replicaId, maxWait, minBytes, maxBytes, Map(pairs:_*))
+    FetchRequest(versionId, correlationId, clientId, replicaId, maxWait, minBytes, maxBytes, ListMap(pairs:_*))
   }
 }
 
@@ -73,9 +73,21 @@ case class FetchRequest(versionId: Short = FetchRequest.CurrentVersion,
         extends RequestOrResponse(Some(ApiKeys.FETCH.id)) {
 
   /**
-   * Partitions the request info into a map of maps (one for each topic).
-   */
-  lazy val requestInfoGroupedByTopic = requestInfo.groupBy(_._1.topic)
+    * Partitions the request info into a list of lists (one for each topic) while preserving request info ordering
+    */
+  private type PartitionInfoList = Vector[(Int, PartitionFetchInfo)]
+  private type TopicInfoEntry = (String, PartitionInfoList)
+  private val requestInfoGroupedByTopic : Vector[TopicInfoEntry] = {
+    requestInfo.foldLeft(Vector.empty[TopicInfoEntry])((folded, currTopicAndPartition) => {
+      val (TopicAndPartition(topic, partition), partitionFetchInfo) = currTopicAndPartition
+      if (folded.isEmpty || folded.last._1 != topic) {
+        folded :+ (topic, Vector((partition, partitionFetchInfo)))
+      } else {
+        val updatedTail = (folded.last._1, folded.last._2 :+ (partition, partitionFetchInfo))
+        folded.dropRight(1) :+ updatedTail
+      }
+    })
+  }
 
   /**
    *  Public constructor for the clients
@@ -111,7 +123,7 @@ case class FetchRequest(versionId: Short = FetchRequest.CurrentVersion,
         writeShortString(buffer, topic)
         buffer.putInt(partitionFetchInfos.size) // partition count
         partitionFetchInfos.foreach {
-          case (TopicAndPartition(_, partition), PartitionFetchInfo(offset, fetchSize)) =>
+          case (partition, PartitionFetchInfo(offset, fetchSize)) =>
             buffer.putInt(partition)
             buffer.putLong(offset)
             buffer.putInt(fetchSize)
@@ -189,7 +201,7 @@ class FetchRequestBuilder() {
   private var maxWait = FetchRequest.DefaultMaxWait
   private var minBytes = FetchRequest.DefaultMinBytes
   private var maxBytes = FetchRequest.DefaultMaxBytes
-  private val requestMap = new collection.mutable.HashMap[TopicAndPartition, PartitionFetchInfo]
+  private val requestMap = new collection.mutable.LinkedHashMap[TopicAndPartition, PartitionFetchInfo]
 
   def addFetch(topic: String, partition: Int, offset: Long, fetchSize: Int) = {
     requestMap.put(TopicAndPartition(topic, partition), PartitionFetchInfo(offset, fetchSize))

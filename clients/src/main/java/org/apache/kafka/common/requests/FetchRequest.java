@@ -14,7 +14,7 @@ package org.apache.kafka.common.requests;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -24,7 +24,6 @@ import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.protocol.ProtoUtils;
 import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
-import org.apache.kafka.common.utils.CollectionUtils;
 
 public class FetchRequest extends AbstractRequest {
 
@@ -52,7 +51,7 @@ public class FetchRequest extends AbstractRequest {
     private final int maxWait;
     private final int minBytes;
     private final int maxBytes;
-    private final Map<TopicPartition, PartitionData> fetchData;
+    private final LinkedHashMap<TopicPartition, PartitionData> fetchData;
 
     public static final class PartitionData {
         public final long offset;
@@ -61,6 +60,30 @@ public class FetchRequest extends AbstractRequest {
         public PartitionData(long offset, int maxBytes) {
             this.offset = offset;
             this.maxBytes = maxBytes;
+        }
+    }
+
+    private static final class TopicAndPartitionData {
+        public final String topic;
+        public final LinkedHashMap<Integer, PartitionData> partitions;
+
+        public TopicAndPartitionData(String topic) {
+            this.topic = topic;
+            this.partitions = new LinkedHashMap<Integer, PartitionData>();
+        }
+
+        public static final List<TopicAndPartitionData> groupByTopicOrdered(Map<TopicPartition, PartitionData> fetchData) {
+            List<TopicAndPartitionData> topics = new ArrayList<TopicAndPartitionData>();
+            for (Map.Entry<TopicPartition, PartitionData> topicEntry : fetchData.entrySet()) {
+                String topic = topicEntry.getKey().topic();
+                int parition = topicEntry.getKey().partition();
+                PartitionData partitionData = topicEntry.getValue();
+                if (topics.isEmpty() || topics.get(topics.size() - 1).topic != topic) {
+                    topics.add(new TopicAndPartitionData(topic));
+                }
+                topics.get(topics.size() - 1).partitions.put(parition, partitionData);
+            }
+            return topics;
         }
     }
 
@@ -88,7 +111,7 @@ public class FetchRequest extends AbstractRequest {
 
     public FetchRequest(int replicaId, int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData, int version, int maxBytes) {
         super(new Struct(ProtoUtils.requestSchema(ApiKeys.FETCH.id, version)));
-        Map<String, Map<Integer, PartitionData>> topicsData = CollectionUtils.groupDataByTopic(fetchData);
+        List<TopicAndPartitionData> topicsData = TopicAndPartitionData.groupByTopicOrdered(fetchData);
 
         struct.set(REPLICA_ID_KEY_NAME, replicaId);
         struct.set(MAX_WAIT_KEY_NAME, maxWait);
@@ -96,11 +119,11 @@ public class FetchRequest extends AbstractRequest {
         if (version >= 3)
             struct.set(RESPONSE_MAX_BYTES_KEY_NAME, maxBytes);
         List<Struct> topicArray = new ArrayList<Struct>();
-        for (Map.Entry<String, Map<Integer, PartitionData>> topicEntry : topicsData.entrySet()) {
+        for (TopicAndPartitionData topicEntry : topicsData) {
             Struct topicData = struct.instance(TOPICS_KEY_NAME);
-            topicData.set(TOPIC_KEY_NAME, topicEntry.getKey());
+            topicData.set(TOPIC_KEY_NAME, topicEntry.topic);
             List<Struct> partitionArray = new ArrayList<Struct>();
-            for (Map.Entry<Integer, PartitionData> partitionEntry : topicEntry.getValue().entrySet()) {
+            for (Map.Entry<Integer, PartitionData> partitionEntry : topicEntry.partitions.entrySet()) {
                 PartitionData fetchPartitionData = partitionEntry.getValue();
                 Struct partitionData = topicData.instance(PARTITIONS_KEY_NAME);
                 partitionData.set(PARTITION_KEY_NAME, partitionEntry.getKey());
@@ -116,7 +139,7 @@ public class FetchRequest extends AbstractRequest {
         this.maxWait = maxWait;
         this.minBytes = minBytes;
         this.maxBytes = maxBytes;
-        this.fetchData = fetchData;
+        this.fetchData = new LinkedHashMap<TopicPartition, PartitionData>(fetchData);
     }
 
     public FetchRequest(Struct struct) {
@@ -128,7 +151,7 @@ public class FetchRequest extends AbstractRequest {
             maxBytes = struct.getInt(RESPONSE_MAX_BYTES_KEY_NAME);
         else
             maxBytes = DEFAULT_RESPONSE_MAX_BYTES;
-        fetchData = new HashMap<TopicPartition, PartitionData>();
+        fetchData = new LinkedHashMap<TopicPartition, PartitionData>();
         for (Object topicResponseObj : struct.getArray(TOPICS_KEY_NAME)) {
             Struct topicResponse = (Struct) topicResponseObj;
             String topic = topicResponse.getString(TOPIC_KEY_NAME);
@@ -145,7 +168,7 @@ public class FetchRequest extends AbstractRequest {
 
     @Override
     public AbstractRequestResponse getErrorResponse(int versionId, Throwable e) {
-        Map<TopicPartition, FetchResponse.PartitionData> responseData = new HashMap<TopicPartition, FetchResponse.PartitionData>();
+        Map<TopicPartition, FetchResponse.PartitionData> responseData = new LinkedHashMap<TopicPartition, FetchResponse.PartitionData>();
 
         for (Map.Entry<TopicPartition, PartitionData> entry: fetchData.entrySet()) {
             FetchResponse.PartitionData partitionResponse = new FetchResponse.PartitionData(Errors.forException(e).code(),
